@@ -1,0 +1,35 @@
+[project]
+name = "webcache-qt"
+version = "5.0.0"
+requires-python = ">=3.13"
+license = "AGPL-3.0-only"
+license-files = ["LICENSE"]
+dependencies = [
+    # PySide6-Essentials, never PySide6. The meta-package pulls in
+    # PySide6_Addons (436.5 MB) including a 195.3 MB browser engine that a
+    # widgets application never loads. Essentials makes its absence
+    # structural rather than an exclude list that can drift back.
+    "PySide6-Essentials>=6.9",
+    "dissect.esedb>=3.18",
+    "openpyxl>=3.1",
+    "reportlab>=4.0",
+]
+
+[project.optional-dependencies]
+# websocket-client drives a real browser over the DevTools protocol in the
+# offline-report tests (tests/_browser.py); the browser is the machine's own.
+dev = ["pytest>=8.0", "pytest-qt>=4.4", "pyinstaller>=6.0",
+       "websocket-client>=1.6"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+# The suites import their fixtures as `from tests.fixtures import ...`, so
+# the project root has to be on sys.path when pytest runs from anywhere.
+pythonpath = ["."]
+
+[tool.setuptools.packages.find]
+include = ["webcache*"]
+
+[tool.setuptools.package-data]
+"webcache.shell" = ["html_package_assets/*"]

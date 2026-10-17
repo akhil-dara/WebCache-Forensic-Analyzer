@@ -1,0 +1,21 @@
+# PyInstaller
+build/
+dist/
+*.spec.bak
+
+# Generated fresh by webcache.spec on every build (packaging/build_icon.py)
+# -- never committed, so the icon can never go stale in version control or
+# missing from a build the way a checked-in binary asset could.
+packaging/webcache.ico
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# App-local, written beside the executable at runtime. Never committed:
+# the case file is keyed to a specific exhibit's SHA-256 and belongs with
+# the examiner, not with the source.
+cases/
+settings.json

@@ -1,0 +1,4 @@
+# The page's inline blocks are hashed into its CSP; a CRLF checkout must never reach them.
+webcache/shell/html_package_assets/*.js text eol=lf
+webcache/shell/html_package_assets/*.css text eol=lf
+webcache/shell/html_package_assets/*.html text eol=lf

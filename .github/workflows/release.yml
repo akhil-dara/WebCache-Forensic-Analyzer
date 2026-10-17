@@ -1,0 +1,246 @@
+name: release
+
+# Builds, checks and publishes the Windows release on a version tag (v5.0.0),
+# or on demand. Three downloads:
+#
+#   WebCacheAnalyzer-<ver>-setup.exe     installer: per-user (no admin) by
+#                                        default, all users with /ALLUSERS
+#   WebCacheAnalyzer-<ver>-portable.zip  the folder build: unzip and run
+#   WebCacheAnalyzer-<ver>-portable.exe  one file; unpacks to %TEMP% per launch
+#
+# plus SHA256SUMS.txt. Every built program is launched in --self-test mode
+# before anything is published, and the installer is installed, run and
+# uninstalled on the runner. The evidence database is not in this
+# repository and never will be: every test runs on generated fixtures.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Check the version
+        id: version
+        shell: pwsh
+        run: |
+          $toml = Get-Content pyproject.toml -Raw
+          if ($toml -notmatch '(?m)^version\s*=\s*"([^"]+)"') { throw "no version in pyproject.toml" }
+          $v = $Matches[1]
+          $tool = python -c "import sys; sys.path.insert(0, '.'); from webcache.provenance import TOOL_VERSION; print(TOOL_VERSION)"
+          if ($tool -ne $v) { throw "pyproject.toml says $v, webcache/provenance.py says $tool" }
+          if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -ne "v$v") {
+            throw "tag $env:GITHUB_REF_NAME does not match version $v"
+          }
+          "version=$v" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+          Write-Output "Version $v"
+
+      - name: Install dependencies
+        # PySide6-Essentials, never the PySide6 meta-package: that pulls in
+        # PySide6_Addons (436.5 MB) including a browser engine this
+        # application never loads.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip list
+
+      - name: Run the suites
+        id: suites
+        # A failing test does not stop the job here: the build, the
+        # self-tests and the installer still run, so one run shows every
+        # problem. The last step fails the job, and nothing is published.
+        continue-on-error: true
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python -m pytest tests/ -q -p no:cacheprovider --junitxml=junit.xml
+          $testExit = $LASTEXITCODE
+          [xml]$j = Get-Content junit.xml
+          $s = if ($j.testsuites) { $j.testsuites.testsuite } else { $j.testsuite }
+          if ($testExit -ne 0) {
+            # The failures LAST, so the end of the log says what failed.
+            Write-Output "`n==================== FAILED TESTS ===================="
+            foreach ($case in $s.testcase) {
+              foreach ($bad in @($case.failure) + @($case.error)) {
+                if ($bad) {
+                  $msg = [string]$bad.message
+                  if ($msg.Length -gt 600) { $msg = $msg.Substring(0, 600) + " ..." }
+                  Write-Output "FAILED $($case.classname)::$($case.name)"
+                  Write-Output "    $msg"
+                }
+              }
+            }
+            throw "pytest exited $testExit -- a failing test must fail the release"
+          }
+          # A suite that degraded to running nothing looks identical to a
+          # passing one, so the count is read from the report and floored.
+          $ran = [int]$s.tests - [int]$s.skipped
+          if ($ran -lt 4000) { throw "only $ran tests ran; expected 4000+" }
+          Write-Output "$ran tests passed"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-report
+          path: junit.xml
+          if-no-files-found: ignore
+
+      - name: Build
+        run: python -m PyInstaller packaging/webcache.spec --noconfirm
+
+      - name: Check the build and report its size
+        shell: pwsh
+        run: |
+          python packaging/check_build.py dist/WebCacheAnalyzer | Tee-Object -Variable report
+          $checkExit = $LASTEXITCODE
+          $report | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          if ($checkExit -ne 0) { throw "check_build.py failed (exit $checkExit)" }
+
+      - name: Self-test both programs
+        shell: pwsh
+        run: |
+          function SelfTest($exe, $out) {
+            $p = Start-Process -FilePath $exe -ArgumentList "--self-test", $out -Wait -PassThru
+            if ($p.ExitCode -ne 0) { throw "$exe --self-test exited $($p.ExitCode)" }
+            $r = Get-Content $out -Raw | ConvertFrom-Json
+            if (-not $r.ok) { throw "$exe self-test failed: $(Get-Content $out -Raw)" }
+            Write-Output "$exe : $(Get-Content $out -Raw)"
+            return $r
+          }
+          $r = SelfTest "dist\WebCacheAnalyzer\WebCacheAnalyzer.exe" "$env:RUNNER_TEMP\onedir.json"
+          if ($r.installed) { throw "the portable folder build believes it is installed" }
+          SelfTest "dist\WebCacheAnalyzer-portable.exe" "$env:RUNNER_TEMP\onefile.json" | Out-Null
+
+      - name: Package the portable builds
+        shell: pwsh
+        run: |
+          $v = "${{ steps.version.outputs.version }}"
+          Compress-Archive -Path dist/WebCacheAnalyzer -DestinationPath "dist/WebCacheAnalyzer-$v-portable.zip"
+          Move-Item dist/WebCacheAnalyzer-portable.exe "dist/WebCacheAnalyzer-$v-portable.exe"
+
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --version=6.7.1 -y --no-progress
+          }
+          & $iscc "/DAppVersion=${{ steps.version.outputs.version }}" "/DSourceDir=..\dist\WebCacheAnalyzer" packaging\webcache.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC exited $LASTEXITCODE" }
+
+      - name: Install, self-test and uninstall
+        shell: pwsh
+        run: |
+          $v = "${{ steps.version.outputs.version }}"
+          $dir = "$env:RUNNER_TEMP\wc-install"
+          $p = Start-Process "dist\WebCacheAnalyzer-$v-setup.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER", "/DIR=$dir" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "setup exited $($p.ExitCode)" }
+          if (-not (Test-Path "$dir\installed")) { throw "the installer did not write its marker" }
+          $out = "$env:RUNNER_TEMP\installed.json"
+          $p = Start-Process "$dir\WebCacheAnalyzer.exe" -ArgumentList "--self-test", $out -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "installed program --self-test exited $($p.ExitCode)" }
+          $r = Get-Content $out -Raw | ConvertFrom-Json
+          if (-not $r.ok -or -not $r.installed) { throw "installed self-test: $(Get-Content $out -Raw)" }
+          if (-not $r.data_dir.StartsWith($env:LOCALAPPDATA)) { throw "case files would go to $($r.data_dir)" }
+          Write-Output "installed: $(Get-Content $out -Raw)"
+          $p = Start-Process "$dir\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "uninstall exited $($p.ExitCode)" }
+          Start-Sleep -Seconds 2
+          if (Test-Path "$dir\WebCacheAnalyzer.exe") { throw "uninstall left the program behind" }
+
+      - name: Checksums and release notes
+        shell: pwsh
+        run: |
+          $v = "${{ steps.version.outputs.version }}"
+          $files = "WebCacheAnalyzer-$v-setup.exe", "WebCacheAnalyzer-$v-portable.zip", "WebCacheAnalyzer-$v-portable.exe"
+          $lines = foreach ($f in $files) {
+            $h = (Get-FileHash "dist/$f" -Algorithm SHA256).Hash.ToLower()
+            "$h  $f"
+          }
+          $lines | Out-File -Encoding ascii dist/SHA256SUMS.txt
+          $notes = @"
+          ## Downloads
+
+          | File | What it is |
+          |---|---|
+          | ``WebCacheAnalyzer-$v-setup.exe`` | **Installer (recommended).** Installs for you alone with no administrator rights, or for every user of the PC when run as administrator. Adds a Start menu entry and an uninstaller; a desktop icon is optional. |
+          | ``WebCacheAnalyzer-$v-portable.zip`` | Portable folder. Unzip anywhere (a USB stick, an examination share) and run ``WebCacheAnalyzer.exe``. Case files stay in the folder. |
+          | ``WebCacheAnalyzer-$v-portable.exe`` | Portable single file. Unpacks to ``%TEMP%`` on every launch, so it starts more slowly and writes to the machine's disk. |
+          | ``SHA256SUMS.txt`` | Checksums of the three files above. |
+
+          Windows 10 or 11, 64-bit. Nothing else to install.
+
+          The installed program keeps case files (tags and comments) in ``%LOCALAPPDATA%\WebCacheAnalyzer``; uninstalling never deletes them. Nothing is ever written beside the evidence.
+
+          Silent install: ``WebCacheAnalyzer-$v-setup.exe /VERYSILENT /CURRENTUSER`` (or ``/ALLUSERS`` from an elevated prompt).
+
+          ### SmartScreen
+
+          These builds are not code-signed, so Windows SmartScreen may say "Windows protected your PC" on first run. Choose **More info** then **Run anyway** -- after checking the download against ``SHA256SUMS.txt``:
+
+          ``````powershell
+          Get-FileHash .\WebCacheAnalyzer-$v-setup.exe -Algorithm SHA256
+          ``````
+          "@
+          ($notes -split "`n" | ForEach-Object { $_ -replace '^          ', '' }) -join "`n" | Out-File -Encoding utf8 dist/RELEASE_NOTES.md
+          Get-Content dist/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: |
+            dist/WebCacheAnalyzer-*-setup.exe
+            dist/WebCacheAnalyzer-*-portable.zip
+            dist/WebCacheAnalyzer-*-portable.exe
+            dist/SHA256SUMS.txt
+            dist/RELEASE_NOTES.md
+          if-no-files-found: error
+
+      - name: Fail the release if any test failed
+        if: steps.suites.outcome == 'failure'
+        shell: pwsh
+        run: throw "The suites failed -- see the end of the 'Run the suites' step. Nothing is published."
+
+  publish:
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: release
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          cd release
+          FILES="WebCacheAnalyzer-$VERSION-setup.exe WebCacheAnalyzer-$VERSION-portable.zip WebCacheAnalyzer-$VERSION-portable.exe SHA256SUMS.txt"
+          # A tag moved to a rebuilt commit updates its release in place:
+          # the files are replaced and the notes refreshed, nothing deleted.
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" $FILES --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --title "WebCache Forensic Analyzer $VERSION" --notes-file RELEASE_NOTES.md
+          else
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --title "WebCache Forensic Analyzer $VERSION" \
+              --notes-file RELEASE_NOTES.md $FILES
+          fi
