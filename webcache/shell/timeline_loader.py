@@ -63,9 +63,10 @@ CARVED_NOT_SCANNED_NOTE = (
 #: Shown with the silence count: a gap in a cache is a gap in what was
 #: cached.
 SILENCE_CAVEAT = ("An empty period means no cached activity, not "
-                  "necessarily no activity. Findings ▸ Silences measures "
-                  "hours between consecutive records instead, so the two "
-                  "counts differ.")
+                  "necessarily no activity. Timeline places each record "
+                  "once, by its key time; Findings ▸ Silences measures gaps "
+                  "in every time this machine wrote to a record instead, so "
+                  "the two counts differ.")
 
 #: strftime format per grain: the keys get_timeline emits. Documents the
 #: label shape; _period_start reads the same fixed-width shape by slicing.
@@ -340,7 +341,6 @@ def member_record_rows(entries, carved_ids=None):
     rows = []
     for entry in entries or ():
         raw_ts, basis = forensic_engine.key_timestamp(entry)
-        visit_count, visit_source = forensic_engine.visit_count_best(entry)
         carved = (id(entry) in carved_ids if carved_ids is not None
                   else provenance.is_carved_entry(entry))
         rows.append({
@@ -355,8 +355,9 @@ def member_record_rows(entries, carved_ids=None):
             "ContainerType": entry.get("ContainerType") or "",
             "ContainerId": entry.get("ContainerId"),
             "ContainerName": entry.get("ContainerName") or "",
-            "VisitCount": visit_count,
-            "VisitCountSource": visit_source,
+            # Each counter under its own name, never merged.
+            "VisitCount": entry.get("SPS_VisitCount"),
+            "CacheTouches": entry.get("AccessCount"),
             "SearchTerms": entry.get("SearchTerms") or "",
             "IsInPrivate": bool(entry.get("IsInPrivate")),
             "Origin": CARVED_ORIGIN if carved else "Live record",

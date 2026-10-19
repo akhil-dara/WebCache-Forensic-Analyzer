@@ -202,13 +202,16 @@ def test_on_matches_regardless_of_time_of_day():
 
 
 def test_time_between_is_inclusive_at_both_ends():
+    """Both days whole: the end bound runs to the end of the day it names
+    (see test_filter_end_bound_covers_its_unit.py)."""
     lo = datetime.datetime(2024, 6, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
-    hi = datetime.datetime(2024, 6, 30, 0, 0, 0, tzinfo=datetime.timezone.utc)
+    next_day = datetime.datetime(2024, 7, 1, 0, 0, 0,
+                                 tzinfo=datetime.timezone.utc)
     c = Condition("between", "2024-06-01", "2024-06-30")
     assert c.matches(lo) is True
-    assert c.matches(hi) is True
+    assert c.matches(next_day - datetime.timedelta(microseconds=1)) is True
     assert c.matches(lo - datetime.timedelta(seconds=1)) is False
-    assert c.matches(hi + datetime.timedelta(seconds=1)) is False
+    assert c.matches(next_day) is False
 
 
 def test_naive_operand_is_treated_as_utc_against_aware_values():

@@ -17,6 +17,7 @@ records and deleted ones have not yet been recovered (see
 main_window.py).
 """
 import logging
+from urllib.parse import unquote
 
 from PySide6.QtCore import QObject, QThread, Signal
 
@@ -65,14 +66,17 @@ def history_rows_from_parser(parser):
         # engine/local_clock.py.
         accessed_local = local_clock.local_naive(entry)
 
-        visit_count, visit_source = forensic_engine.visit_count_best(entry)
 
         rows.append({
             "CleanUrl": entry.get("CleanUrl") or entry.get("Url") or "",
             "Title": entry.get("SPS_PageTitle") or "",
             "AccessedUtc": accessed_utc,
             "AccessedLocal": accessed_local,
-            "VisitCount": visit_count,
+            # The browser's visit counter (SPS id 6) only, None when the
+            # record stores none; cache touches are their own column and
+            # are never offered as visits.
+            "VisitCount": entry.get("SPS_VisitCount"),
+            "CacheTouches": entry.get("AccessCount"),
             "Domain": forensic_engine.extract_domain(entry.get("Url") or ""),
             "IsInPrivate": bool(entry.get("IsInPrivate")),
             "Origin": provenance.LIVE_ORIGIN,
@@ -95,10 +99,6 @@ def history_rows_from_parser(parser):
             # was touched" are different claims. "" only when the record
             # carries no timestamp.
             "AccessedUtcBasis": basis,
-            # Which counter the number came from, in forensic_engine's
-            # words (the VisitCountBestSource every export carries). SPS id
-            # 6 counts the user's visits; AccessCount counts cache touches.
-            "VisitCountSource": visit_source,
             # Established by the `continue` above rather than read from the
             # entry, so provenance.describe_origin() can explain a live
             # record (as recovery_loader.carved_history_rows does for a
@@ -138,7 +138,6 @@ def file_access_rows_from_parser(parser):
         if not entry.get("IsLocalFile"):
             continue
 
-        visit_best, visit_source = forensic_engine.visit_count_best(entry)
         _raw_ts, basis = forensic_engine.key_timestamp(entry)
 
         rows.append({
@@ -148,7 +147,10 @@ def file_access_rows_from_parser(parser):
             "ModifiedTime": filetime_to_dt(
                 local_clock.utc_raw(entry, "ModifiedTime_raw")),
             "AccessedLocal": local_clock.local_naive(entry),
-            "VisitCountBest": visit_best,
+            # Each counter under its own name, never merged: the browser's
+            # visit counter (SPS id 6) and the cache entry's touches.
+            "VisitCount": entry.get("SPS_VisitCount"),
+            "CacheTouches": entry.get("AccessCount"),
             "CleanUrl": entry.get("CleanUrl") or entry.get("Url") or "",
             # derived, beside the stored value.
             "LocalPath": url_intel.windows_path_from_file_url(
@@ -170,7 +172,6 @@ def file_access_rows_from_parser(parser):
             "CreationTime": filetime_to_dt(entry.get("CreationTime_raw")),
             "_record": entry,
             "_kind": K_FILE_ACCESS,
-            "VisitCountSource": visit_source,
             # WHICH COLUMN THE RECORD'S CANONICAL INSTANT CAME FROM, in
             # key_timestamp()'s own words. Read the VALUE, not the key
             # name, for what it asserts: it names the column that won the
@@ -262,7 +263,7 @@ def cookie_rows_from_parser(parser):
     """
     rows = []
     for entry in parser.cookie_entries:
-        rows.append({
+        row = {
             "Domain": entry.get("Domain") or "",
             "Name": entry.get("Name") or "",
             "Value": entry.get("Value") or "",
@@ -274,7 +275,13 @@ def cookie_rows_from_parser(parser):
             # Bit 0x1 of the cookie's Flags, decoded by ese_parser: whether
             # a cookie was restricted to HTTPS.
             "IsSecure": bool(entry.get("IsSecure")),
-        })
+        }
+        # The value with its percent-escapes decoded, beside the stored
+        # one; only when decoding changes it.
+        decoded = unquote(row["Value"]) if "%" in row["Value"] else row["Value"]
+        if decoded != row["Value"]:
+            row["ValueDecoded"] = decoded
+        rows.append(row)
     return rows
 
 

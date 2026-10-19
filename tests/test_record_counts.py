@@ -105,7 +105,11 @@ def test_findings_is_badged_the_moment_evidence_loads(win):
 
 def test_the_silence_wording_names_how_it_differs_from_timeline():
     from webcache.views.iocs import _voids_subtitle
-    assert "Timeline counts empty periods instead" in _voids_subtitle(3)
+    # Both screens state the same difference, from their own side.
+    assert "Timeline places each record once, by its key time" in (
+        _voids_subtitle(3))
+    assert "Timeline places each record once, by its key time" in (
+        timeline_loader.SILENCE_CAVEAT)
     assert "Findings ▸ Silences measures" in timeline_loader.SILENCE_CAVEAT
 
 

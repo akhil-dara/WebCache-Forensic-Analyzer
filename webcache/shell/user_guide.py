@@ -141,7 +141,9 @@ TOPICS = [
         "<b>EntryId gaps</b> &mdash; containers with holes in their EntryId "
         "sequence: consistent with deletion, with routine cache scavenging, "
         "or with an uncommitted transaction.",
-        "<b>Silences</b> &mdash; long gaps between consecutive records.",
+        "<b>Silences</b> &mdash; long gaps in which no record holds any "
+        "time this machine wrote: a visit, a cache use, a cache write or a "
+        "re-check with the server.",
         "<b>Beaconing</b> &mdash; domains contacted at regular intervals.",
         "<b>Deceptive domains</b> &mdash; look-alike host names.",
         "<b>Redirect chains</b> &mdash; one address handing on to another.") +
@@ -308,8 +310,7 @@ TOPICS = [
         "Paths shown belong to the examined machine. They are copied, never "
         "opened, and the tool makes no network request.",
         "A database left in a dirty-shutdown state is read as it is; no "
-        "repair is run, because a repair changes the evidence and can "
-        "destroy records that exist only in that state.",
+        "repair is run, because a repair writes to the evidence file.",
         "Records Windows had not yet written into the database file exist "
         "only in its transaction logs (V01.log and V01*.log). The Open "
         "dialog states when no log is beside the database.")),

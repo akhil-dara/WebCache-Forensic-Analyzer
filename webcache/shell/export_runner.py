@@ -197,7 +197,8 @@ class ExportWorker(QThread):
         return {
             "pdf": lambda p: engine.export_pdf_report(
                 job.entries, stats(), p, job.case_meta, job.db_info,
-                job.recovery_summary, job.recovered),
+                job.recovery_summary, job.recovered,
+                job.scope.get("recovery_scan_run")),
             "sqlite_raw": lambda p: engine.export_sqlite_raw(
                 job.parser, p, job.case_meta, job.recovered),
             "xlsx": lambda p: engine.export_xlsx(

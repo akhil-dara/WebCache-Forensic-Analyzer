@@ -587,8 +587,11 @@ def test_the_timestamp_basis_is_the_sub_line_under_the_time_it_explains():
 
 
 def test_the_visit_count_says_which_counter_it_came_from():
-    field = _by_label(df.fields_for(history_row()), "Visits")
-    assert "SPS id6" in field.note
+    """The label names the counter; cache touches are never offered under
+    it (test_visits_and_cache_touches_never_merged.py)."""
+    field = _by_label(df.fields_for(history_row()), "Visits (property store)")
+    _short, tooltip = df.basis_badge(field.field)
+    assert "property ID 6" in tooltip
 
 
 # --- flattening: stated, never joined into one opaque string ------------

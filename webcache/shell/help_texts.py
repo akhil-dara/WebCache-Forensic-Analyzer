@@ -10,6 +10,8 @@ ABOUT_TEXT = (
     "the transaction logs, and states the provenance of every value. The "
     "evidence folder is never written to; paths shown belong to the "
     "examined machine and are copied, never opened.\n\n"
+    "Reads ESE databases with dissect.esedb (Fox-IT, Apache-2.0). "
+    "Interface: Qt for Python (LGPL-3.0). See THIRD-PARTY-NOTICES.\n\n"
     "Released under the GNU Affero General Public License v3.0.\n"
     "© 2026 Akhil Dara." % provenance.TOOL_VERSION)
 

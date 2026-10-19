@@ -31,7 +31,7 @@ def test_canonical_cells_are_stored_per_record_in_schema_order():
     island = _island()
     assert [f[0] for f in island["fields"]] == forensic_engine.ENTRY_FIELD_KEYS
     record = island["records"][0]
-    assert len(record["c"]) == 80
+    assert len(record["c"]) == 81
     index = forensic_engine.ENTRY_FIELD_KEYS.index("EntryId")
     assert record["c"][index] == 1
 

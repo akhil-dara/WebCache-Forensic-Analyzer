@@ -408,6 +408,10 @@ function renderSummary(main) {
     page.appendChild(el("h2", null, "Source integrity"));
     page.appendChild(kvTable(integrity.source));
   }
+  if ((integrity.clock || []).length) {
+    page.appendChild(el("h2", null, "Clock"));
+    page.appendChild(kvTable(integrity.clock));
+  }
   if ((integrity.log || []).length) {
     page.appendChild(el("h2", null, "Parse decisions"));
     var list = el("ol");

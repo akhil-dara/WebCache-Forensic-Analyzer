@@ -298,6 +298,23 @@ def raw_view(parser, caption=""):
                        caption or RAW_VIEW_CAPTION, segments, picker="list")
 
 
+def integrity_section(info):
+    """The Integrity screen's cards for the page: hashes, source
+    integrity, the clock offsets observed and the decision log. The
+    clock leaves out "Times shown as", the examiner's display setting."""
+    return {
+        "hashes": [[r["File"], r["Role"], r["SHA256"]]
+                   for r in integrity_loader.hash_rows(info)],
+        "source": [[r["label"], r["value"], r["tooltip"]]
+                   for r in integrity_loader.source_integrity_rows(info)],
+        "clock": [[r["label"], r["value"], r["tooltip"]]
+                  for r in integrity_loader.clock_rows(info)
+                  if r["label"] != "Times shown as"],
+        "log": [[r["text"], r["flagged"]]
+                for r in integrity_loader.decision_log_rows(info)],
+    }
+
+
 def snapshot_from_window(window, member_columns=()):
     parser = getattr(window, "_parser", None)
     labels = getattr(window, "_labels", None) or {}
@@ -346,14 +363,7 @@ def snapshot_from_window(window, member_columns=()):
         "zone": {"offset_seconds": offset,
                  "label": local_clock.zone_label(offset)},
     }
-    integrity = {
-        "hashes": [[r["File"], r["Role"], r["SHA256"]]
-                   for r in integrity_loader.hash_rows(info)],
-        "source": [[r["label"], r["value"], r["tooltip"]]
-                   for r in integrity_loader.source_integrity_rows(info)],
-        "log": [[r["text"], r["flagged"]]
-                for r in integrity_loader.decision_log_rows(info)],
-    }
+    integrity = integrity_section(info)
     return PackageSnapshot(
         views, meta, summary=summary, integrity=integrity,
         scope=list(evidence_model.SCOPE_STATEMENTS),

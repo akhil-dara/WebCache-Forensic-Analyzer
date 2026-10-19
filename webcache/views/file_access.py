@@ -29,7 +29,8 @@ FILE_ACCESS_COLUMNS = [
                 "which that container keeps on the LOCAL clock. It is the "
                 "visit's local time -- not Modified (UTC) shifted to "
                 "local.")),
-    Column("VisitCountBest", "Opens", 70, kind="num", field="VisitCountBest"),
+    Column("VisitCount", "Opens (property store)", 90, kind="num",
+           field="SPS_VisitCount"),
     Column("CleanUrl", "Local file path (as stored)", 380, kind="path",
           field="CleanUrl"),
     # The stored file: URL decoded, beside the stored value.
@@ -45,6 +46,9 @@ FILE_ACCESS_COLUMNS = [
     # Repeated carves of one record; blank on a live row and on a unique
     # carve.
     Column("Copies", "Copies", 100, kind="text"),
+    # Touches of the cache entry, never opens.
+    Column("CacheTouches", "Cache touches", 80, kind="num",
+           field="AccessCount"),
     Column("Origin", "Source record", 170, kind="flag", field="Origin"),
     Column("FileSize", "Size", 100, kind="size", field="FileSize"),
     Column("ContainerId", "Container ID", 110, kind="num", field="ContainerId"),

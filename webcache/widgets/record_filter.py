@@ -138,6 +138,31 @@ def _blank(value):
     return value is None or value == ""
 
 
+#: An operand's text -> the length of the unit it names, for an end
+#: bound: "2026-02-16" names a whole day, "2026-02-16 12:00" a minute.
+_UNIT_SPANS = (
+    (re.compile(r"\d{4}-\d{2}-\d{2}|\d{8}"), datetime.timedelta(days=1)),
+    (re.compile(r"\d{4}-\d{2}-\d{2}[ T]\d{2}"), datetime.timedelta(hours=1)),
+    (re.compile(r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}"),
+     datetime.timedelta(minutes=1)),
+    (re.compile(r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}"),
+     datetime.timedelta(seconds=1)),
+)
+
+
+def _unit_end(text):
+    """How far past an operand's instant its unit runs, as an inclusive
+    end ("2026-02-16" -> 23:59:59.999999 later), or None for an operand
+    that names an exact instant (a fraction, an offset) or no date."""
+    if isinstance(text, int) and not isinstance(text, bool):
+        text = str(text)              # a compact YYYYMMDD from a spinbox
+    s = str(text).strip() if isinstance(text, str) else ""
+    for pattern, span in _UNIT_SPANS:
+        if pattern.fullmatch(s):
+            return span - datetime.timedelta(microseconds=1)
+    return None
+
+
 def _parse_dt(value):
     """Turn an operand into an aware UTC datetime, or raise ValueError.
 
@@ -275,7 +300,7 @@ class Condition:
 
     __slots__ = ("op", "a", "b", "case_sensitive", "error", "_rx",
                  "anchor", "_a_dt", "_b_dt", "_a_num", "_b_num",
-                 "_a_naive", "_b_naive")
+                 "_a_naive", "_b_naive", "_end_whole")
 
     def __init__(self, op, a=None, b=None, case_sensitive=False, anchor=None):
         self.op = op
@@ -291,6 +316,8 @@ class Condition:
         self._b_num = None
         self._a_naive = _is_naive_operand(a)
         self._b_naive = _is_naive_operand(b)
+        #: True when the end bound was widened to the end of its unit.
+        self._end_whole = False
 
         if op == "matches regex" and a:
             try:
@@ -368,6 +395,19 @@ class Condition:
                     self._a_naive, self._b_naive = self._b_naive, self._a_naive
                 if swap_num or swap_dt:
                     self.a, self.b = self.b, self.a
+            # An end bound covers the whole unit it names: "and
+            # 2026-02-16" runs to the end of that day, not its first
+            # instant.
+            end_bound = (self.b if op == "between"
+                         else self.a if op == "<=" else None)
+            span = _unit_end(end_bound) if self.error is None else None
+            if span is not None:
+                if op == "between" and self._b_dt is not None:
+                    self._b_dt = self._b_dt + span
+                    self._end_whole = True
+                elif op == "<=" and self._a_dt is not None:
+                    self._a_dt = self._a_dt + span
+                    self._end_whole = True
         elif op == "in the last N days":
             if a is not None:
                 try:
@@ -527,7 +567,10 @@ class Condition:
         if self.op in ("is blank", "is not blank"):
             return self.op
         if self.op == "between":
-            return "between %s and %s" % (self.a, self.b)
+            return "between %s and %s%s" % (
+                self.a, "the end of " if self._end_whole else "", self.b)
+        if self.op == "<=" and self._end_whole:
+            return '<= the end of "%s"' % (self.a,)
         if self.op == "in the last N days":
             return "in the last %s days" % (self.a,)
         return '%s "%s"' % (self.op, self.a)

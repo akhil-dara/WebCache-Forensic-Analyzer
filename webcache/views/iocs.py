@@ -70,9 +70,12 @@ def _gaps_subtitle(count):
 
 
 def _voids_subtitle(count):
-    return ("%s gap%s of 24 hours or more between consecutive records. "
-           "Timeline counts empty periods instead, so the totals differ. "
-           "A gap describes the records, not the user's activity."
+    return ("%s gap%s of 24 hours or more in which no record holds any "
+           "time this machine wrote (a visit, a cache use, a cache write or "
+           "a re-check with the server); a server's own dates are not "
+           "counted. Timeline places each record once, by its key time, so "
+           "its empty periods differ. A gap describes the records, not the "
+           "user's activity."
            % (format(count, ","), "" if count == 1 else "s"))
 
 

@@ -165,10 +165,12 @@ def test_visit_count_prefers_sps_over_access_count():
     assert carved_history_rows(engine)[0]["VisitCount"] == 7
 
 
-def test_visit_count_falls_back_to_access_count():
+def test_cache_touches_are_never_offered_as_visits():
     engine = _StubEngine(structured_records=[
         _structured(SPS_VisitCount=None, AccessCount=42)])
-    assert carved_history_rows(engine)[0]["VisitCount"] == 42
+    row = carved_history_rows(engine)[0]
+    assert row["VisitCount"] is None
+    assert row["CacheTouches"] == 42
 
 
 def test_accessed_utc_is_a_real_datetime():
@@ -271,16 +273,17 @@ def test_carved_file_access_rows_carry_every_key_the_view_reads():
         IsLocalFile=True, FileSize=512, ContainerId=4, ContainerName="Content",
         EntryId=12)])
     row = carved_file_access_rows(engine)[0]
-    for key in ("ModifiedTime", "AccessedLocal", "VisitCountBest", "CleanUrl",
+    for key in ("ModifiedTime", "AccessedLocal", "VisitCount", "CacheTouches", "CleanUrl",
                "Origin", "Source", "FileSize", "ContainerId", "ContainerName",
                "EntryId", "AccessedTime", "CreationTime"):
         assert key in row, "FileAccessView's file-access columns read %r" % key
 
 
-def test_carved_file_access_visit_count_falls_back_to_access_count():
+def test_carved_file_access_never_offers_cache_touches_as_opens():
     engine = _StubEngine(structured_records=[_structured(
         IsLocalFile=True, SPS_VisitCount=None, AccessCount=13)])
-    assert carved_file_access_rows(engine)[0]["VisitCountBest"] == 13
+    row = carved_file_access_rows(engine)[0]
+    assert (row["VisitCount"], row["CacheTouches"]) == (None, 13)
 
 
 def test_no_local_file_structured_records_means_no_carved_file_access_rows():
@@ -589,6 +592,9 @@ class _FakeRecoveryEngine:
             progress_callback(200, 0)
         return []
 
+    def attribute_carved_pages(self, db):
+        _FakeRecoveryEngine.calls.append(("attribute_carved_pages", db))
+
 
 @pytest.fixture(autouse=True)
 def _reset_fake_engine_calls():
@@ -616,8 +622,11 @@ def test_the_three_carve_phases_run_in_order_with_the_right_arguments(
         loader.start(parser)
 
     kinds = [c[0] for c in _FakeRecoveryEngine.calls]
+    # Attribution reads the pages and the reconstructed records, so it
+    # comes after both.
     assert kinds == ["set_container_metadata", "carve_transaction_logs",
-                     "carve_database_slack", "carve_structured_records"]
+                     "carve_database_slack", "carve_structured_records",
+                     "attribute_carved_pages"]
 
     _, containers_meta, container_types = _FakeRecoveryEngine.calls[0]
     assert containers_meta == parser.containers_meta

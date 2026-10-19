@@ -55,6 +55,9 @@ def _entry(**overrides):
         "Url": "https://example.test/page",
         "CleanUrl": "https://example.test/page",
         "ModifiedTime_raw": FT,
+        # A cached file is placed in time by when it was used here; its
+        # ModifiedTime is the server's date (forensic_engine._key_order).
+        "AccessedTime_raw": FT,
         "ResponseHeaders_raw": RESP_BLOB,
         "RequestHeaders_raw": REQ_BLOB,
         "ResponseHeaders": ese_parser.decode_content_headers(RESP_BLOB),

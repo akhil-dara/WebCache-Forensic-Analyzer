@@ -56,9 +56,9 @@ def _dl_row(**overrides):
 
 def test_file_access_columns_match_the_spec():
     keys = [c.key for c in FILE_ACCESS_COLUMNS]
-    assert keys == ["ModifiedTime", "AccessedLocal", "VisitCountBest",
+    assert keys == ["ModifiedTime", "AccessedLocal", "VisitCount",
                     "CleanUrl", "LocalPath", "Drive", "FileType",
-                    "SameVisit", "Copies", "Origin",
+                    "SameVisit", "Copies", "CacheTouches", "Origin",
                     "FileSize",
                     "ContainerId",
                     "ContainerName", "EntryId", "AccessedTime", "CreationTime",

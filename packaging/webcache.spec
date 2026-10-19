@@ -34,6 +34,14 @@ VERSION_FILE = str(version_info.write(
 
 block_cipher = None
 
+from PyInstaller.utils.hooks import copy_metadata
+
+#: The distributions the application ships, whose licence and copyright
+#: files go with it.
+THIRD_PARTY = ["dissect.esedb", "dissect.cstruct", "dissect.util",
+               "PySide6-Essentials", "shiboken6", "openpyxl", "et_xmlfile",
+               "reportlab", "pillow", "charset-normalizer"]
+
 EXCLUDES = [
     # Qt modules a widgets application never loads. Also a second line of
     # defence: the project depends on PySide6-Essentials, so Addons should
@@ -70,7 +78,10 @@ a = Analysis(
     # The offline HTML report reads its template, stylesheet and scripts
     # from disk at export time (webcache/shell/html_package.py).
     datas=[("../webcache/shell/html_package_assets",
-            "webcache/shell/html_package_assets")],
+            "webcache/shell/html_package_assets"),
+           ("../THIRD-PARTY-NOTICES.md", "."), ("../LICENSE", "."),
+           ("../licenses", "licenses")]
+          + [entry for dist in THIRD_PARTY for entry in copy_metadata(dist)],
     hiddenimports=["dissect.esedb"],
     excludes=EXCLUDES,
     cipher=block_cipher,

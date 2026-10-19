@@ -36,6 +36,10 @@ class DomainsView(RecordsView):
             Column("Domain", "Domain", 280, kind="url", field="Domain",
                   on_click=lambda row: self.show_domain(row.get("Domain"))),
             Column("Records", "Records", 80, kind="num"),
+            # The browser's own visit counter, each address once; not the
+            # record count, which also holds cache requests.
+            Column("Visits", "Visits (property store)", 110, kind="num",
+                  field="DomainVisits"),
             Column("Carved", "From deleted", 100, kind="carved"),
             Column("OnlyCarved", "Deleted only", 120, kind="only_carved"),
             Column("FileSize", "Cached size", 100, kind="size", field="FileSize"),
@@ -43,7 +47,7 @@ class DomainsView(RecordsView):
             Column("LastSeen", "Last seen (UTC)", 165, kind="time"),
             Column("ContainerType", "Container types", 170, kind="types",
                   field="ContainerType", multi=True),
-            Column("AccessCount", "Avg visits", 80, kind="num",
+            Column("AccessCount", "Mean cache touches", 80, kind="num",
                   field="AccessCount"),
             Column("IsInPrivate", "InPrivate", 80, kind="flag",
                   field="IsInPrivate"),

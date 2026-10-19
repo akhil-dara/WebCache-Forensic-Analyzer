@@ -70,7 +70,7 @@ def _reportlab():
     return (rl_colors, A4, getSampleStyleSheet, ParagraphStyle, mm,
             SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak)
 
-from .ese_parser import filetime_to_dt, filetime_to_rfc3339
+from .ese_parser import filetime_to_dt, filetime_to_rfc3339, header_time_rows
 from . import evidence_model as em
 from . import ese_records
 from . import local_clock
@@ -182,6 +182,9 @@ ENTRY_FIELDS = [
     ("ContainerId",            "ContainerId",             "Identity"),
     ("ContainerName",          "ContainerName",           "Identity"),
     ("ContainerType",          "ContainerType",           "Identity"),
+    # Blank when the record stored its container; otherwise how a
+    # recovered record's container was inferred.
+    ("ContainerFrom",          "ContainerIdentifiedBy",   "Identity"),
     ("TableName",              "SourceTable",             "Identity"),
     ("CacheId",                "CacheId",                 "Identity"),
     ("UrlHash",                "UrlHash",                 "Identity"),
@@ -386,6 +389,48 @@ KEY_TIMESTAMP_ORDER = (
     ("CreationTime_raw", "CreationTime"),
 )
 
+#: Containers whose ModifiedTime is the visit. In any other known
+#: container (Content and the rest) ModifiedTime is the server's
+#: last-modified date of what was cached -- measured on an exhibit to
+#: fall before the cache entry's own creation -- so it is not the
+#: record's instant there.
+VISIT_CONTAINER_TYPES = frozenset(("History",))
+
+
+#: Times this machine writes to a cache entry: when it was used, written
+#: and re-checked with the server. ModifiedTime joins them where it is the
+#: visit (_key_order). The server's own dates (expiry, a cached file's
+#: last-modified) never do.
+_MACHINE_TIME_FIELDS = ("AccessedTime_raw", "CreationTime_raw", "SyncTime_raw")
+
+
+def machine_times(entry):
+    """Every instant (raw FILETIME, UTC) at which this record shows the
+    machine at work. An MSHist ModifiedTime on the local clock is placed
+    in UTC as key_timestamp places it, or left out when it cannot be."""
+    out = []
+    if any(f == "ModifiedTime_raw" for f, _d in _key_order(entry)):
+        raw = entry.get("ModifiedTime_raw")
+        if raw and local_clock.is_local_clock(entry, "ModifiedTime_raw"):
+            raw = local_clock.utc_raw(entry, "ModifiedTime_raw")
+        if raw:
+            out.append(raw)
+    for field in _MACHINE_TIME_FIELDS:
+        raw = entry.get(field)
+        if raw:
+            out.append(raw)
+    return out
+
+
+def _key_order(entry):
+    """KEY_TIMESTAMP_ORDER for this record: without ModifiedTime when the
+    record's container is known and is not one whose ModifiedTime is the
+    visit. An unknown container keeps it, since nothing says otherwise."""
+    ctype = str(entry.get("ContainerType") or "")
+    if ctype and ctype not in VISIT_CONTAINER_TYPES:
+        return KEY_TIMESTAMP_ORDER[1:]
+    return KEY_TIMESTAMP_ORDER
+
 
 def key_timestamp(entry):
     """The record's canonical instant AS UTC, and which column it came from.
@@ -396,7 +441,7 @@ def key_timestamp(entry):
     recovered zone, or 0 when there is none -- never the local digits
     labelled UTC, and never a silent fall-through to a different column.
     """
-    for field, description in KEY_TIMESTAMP_ORDER:
+    for field, description in _key_order(entry):
         raw = entry.get(field)
         if not raw:
             continue
@@ -448,7 +493,7 @@ def key_timestamp_display(entry):
     Returns (text, which column it came from); ("", "") when the record
     carries no timestamp.
     """
-    for field, description in KEY_TIMESTAMP_ORDER:
+    for field, description in _key_order(entry):
         if not entry.get(field):
             continue
         if local_clock.is_local_clock(entry, field):
@@ -836,18 +881,44 @@ CONTAINER_SHEET_LIMIT = 200
 HUNDREDS_OF_NANOSECONDS = 10_000_000
 
 
-def _pdf_visit_cell(entry):
-    """Visit figure for the report, marked when it is only a cache touch.
+def pdf_history_rows(history_entries):
+    """The PDF report's History table as text rows, header first, newest
+    first in UTC (see engine/local_clock.py for why not the raw column)."""
+    rows = [["Visit (UTC)", "Visits", "Cache touches", "URL"]]
+    ordered = sorted(
+        history_entries,
+        key=lambda e: local_clock.utc_raw(e, "ModifiedTime_raw"),
+        reverse=True)
+    for e in ordered:
+        rows.append([
+            (e.get("ModifiedTime", "") or "").replace(" UTC", ""),
+            # Each counter in its own column, never merged: the browser's
+            # visit counter (blank where none is stored), and the cache
+            # entry's touches.
+            _count_text(e.get("SPS_VisitCount")),
+            _count_text(e.get("AccessCount")),
+            e.get("CleanUrl") or e.get("Url", ""),
+        ])
+    return rows
 
-    The property store counts user visits; the AccessCount column counts cache
-    touches. A bare number in a court report would not distinguish them, so a
-    fallback value is marked and the marker explained in the methodology.
-    """
-    value = entry.get("SPS_VisitCount")
-    if value is not None:
-        return str(value)
-    value = entry.get("AccessCount")
-    return "" if value is None else f"{value}*"
+
+def _iso_header_times(times):
+    """The header times as RFC 3339 UTC text (null where never set), with
+    the repair count; {} when the header was not read."""
+    if not times:
+        return {}
+    out = {}
+    for key, value in times.items():
+        if hasattr(value, "strftime"):
+            text = value.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+            out[key] = text + ("Z" if value.tzinfo is not None else "")
+        else:
+            out[key] = value
+    return out
+
+
+def _count_text(value):
+    return "" if value is None else str(value)
 
 
 def local_filetime_to_utc_rfc3339(raw, offset_seconds):
@@ -1873,7 +1944,8 @@ class ForensicEngine:
         if hist:
             hist_cols = [("KeyTimestampUTC", "Visit (UTC)"),
                          ("SPS_LastVisitLocal", "Last visit (LOCAL)"),
-                         ("VisitCountBest", "Visits"), ("CleanUrl", "URL"),
+                         ("SPS_VisitCount", "Visits (property store)"),
+                         ("AccessCount", "Cache touches"), ("CleanUrl", "URL"),
                          ("SearchTerms", "Search terms"), ("SPS_PageTitle", "Page title"),
                          ("IsInPrivate", "InPrivate"), ("IsLocalFile", "Local file"),
                          ("Domain", "Domain"), ("UrlUsername", "User"),
@@ -1895,7 +1967,8 @@ class ForensicEngine:
                 ("DownloadTime", "Download time (UTC)"), ("FileSize", "Cached size"),
                 ("Filename", "Cached filename"),
                 ("KeyTimestampUTC", "Last activity (UTC)"),
-                ("VisitCountBest", "Opens")], dl,
+                ("SPS_VisitCount", "Opens (property store)"),
+                ("AccessCount", "Cache touches")], dl,
                 timestamps=("KeyTimestampUTC",))
 
         # ---------- 5. Auxiliary artifact tables ----------
@@ -2059,7 +2132,10 @@ class ForensicEngine:
 
     def analyze_time_voids(self, min_gap_hours: float = 24.0,
                            extra_entries=None, report=None) -> list:
-        """Periods with no recorded activity inside an otherwise active span.
+        """Periods in which no record holds any time this machine wrote
+        (machine_times: a visit, a cache use, a cache write, a re-check
+        with the server), inside an otherwise active span. The server's own
+        dates are not activity here.
 
         A silence is an observation about the records, not about the person.
         The machine may have been off, the account not in use, another
@@ -2083,7 +2159,11 @@ class ForensicEngine:
         wherever the silences are.
         """
         records = list(self.entries) + list(extra_entries or [])
-        dts = sorted(d for d in (self._entry_date(e) for e in records) if d)
+        # Every time a record shows the machine at work, not only its key
+        # instant: a record visited before a gap whose cache entry was
+        # used inside it shows the machine in use there.
+        dts = sorted(d for d in (filetime_to_dt(raw) for e in records
+                                 for raw in machine_times(e)) if d)
         windows = []
         for e in records:
             if local_clock.is_unplaced(e):
@@ -2223,6 +2303,10 @@ class ForensicEngine:
             "evidence_sha256": db_info.get("sha256", ""),
             "related_file_hashes": db_info.get("source_hashes", {}),
             "database_state": db_info.get("db_state_text", ""),
+            # The header's own times about the file (created, last opened,
+            # last left consistent, last detached, last repaired).
+            "database_header_times": _iso_header_times(
+                db_info.get("header_times")),
             "derived_machine_timezone": db_info.get("derived_tz", ""),
             "timezone_policy": ("All timestamps UTC (RFC 3339) unless explicitly "
                                 "labeled LOCAL (SPS property 24 is machine-local)."),
@@ -2253,7 +2337,8 @@ class ForensicEngine:
     def export_pdf_report(self, entries: list, stats: dict, filepath: str,
                           case_meta: dict, db_info: dict,
                           recovery_summary: Optional[dict] = None,
-                          recovered: Optional[list] = None):
+                          recovered: Optional[list] = None,
+                          recovery_scan_run: Optional[bool] = None):
         """Signed-report-grade PDF: provenance header, hashes, methodology,
         statistics, EntryId gaps, recovered artifacts, top records."""
         if not HAS_REPORTLAB:
@@ -2302,6 +2387,8 @@ class ForensicEngine:
             ["Evidence source", header["evidence_source"]],
             ["Evidence SHA-256", header["evidence_sha256"]],
             ["Database state", header["database_state"]],
+        ] + [[label, value] for label, value, _tip in header_time_rows(
+            (db_info or {}).get("header_times"))] + [
             ["Machine timezone (derived)", header["derived_machine_timezone"] or "n/a"],
             ["Tool", header["tool"]],
             ["Generated (UTC)", header["generated_utc"]],
@@ -2380,6 +2467,9 @@ class ForensicEngine:
             ["InPrivate entries", str(stats.get("inprivate_count", 0))],
             ["Local-file (file:///) accesses",
              str(sum(1 for e in entries if e.get("IsLocalFile")))],
+            ["Download records (iedownload)",
+             str(sum(1 for e in entries
+                     if e.get("ContainerType") == "Downloads"))],
         ]
         if recovery_summary:
             stat_rows += [
@@ -2442,12 +2532,19 @@ class ForensicEngine:
         story.append(PageBreak())
         if not recovered:
             story.append(section("Recovered Artifacts"))
-            story.append(Paragraph(
-                "No deleted or unflushed records are included in this report. "
-                "Either the recovery scan was not run for this case, or it "
-                "recovered nothing. This is not evidence that the database "
-                "contains no deleted records \u2014 run the recovery scan to "
-                "establish that.", body))
+            if recovery_scan_run:
+                said = ("The recovery scan was run and recovered no records. "
+                        "Recovery is heuristic carving, so this is not proof "
+                        "that the database holds no deleted records.")
+            elif recovery_scan_run is False:
+                said = ("The recovery scan was not run for this case, so no "
+                        "deleted or unflushed records are included. This is "
+                        "not evidence that the database contains none.")
+            else:
+                said = ("No deleted or unflushed records are included in "
+                        "this report. This is not evidence that the database "
+                        "contains none.")
+            story.append(Paragraph(said, body))
         else:
             story.append(section(
                 f"Recovered Artifacts ({len(recovered)}) \u2014 "
@@ -2475,22 +2572,14 @@ class ForensicEngine:
         story.append(PageBreak())
         story.append(section(f"History Records (all {len(hist):,})"))
         story.append(Paragraph(
-            "Visits marked with an asterisk come from the AccessCount column, "
-            "which counts cache touches rather than user visits; unmarked "
-            "figures come from the property store and do count user visits. "
-            "URLs are printed in full.", body))
-        hrows = [["Visit (UTC)", "Visits", "URL"]]
-        # UTC order: see engine/local_clock.py for why not the raw column.
-        hist_sorted = sorted(
-            hist, key=lambda e: local_clock.utc_raw(e, "ModifiedTime_raw"),
-            reverse=True)
-        for e in hist_sorted:
-            hrows.append([
-                (e.get("ModifiedTime", "") or "").replace(" UTC", ""),
-                _pdf_visit_cell(e),
-                Paragraph(esc(e.get("CleanUrl") or e.get("Url", "")), mono),
-            ])
-        t = Table(hrows, colWidths=[30 * mm, 13 * mm, 137 * mm])
+            "Visits come from the property store, the browser's own visit "
+            "counter, and are blank where a record stores none. Cache touches "
+            "come from the AccessCount column and are not visits. URLs are "
+            "printed in full.", body))
+        hrows = pdf_history_rows(hist)
+        hrows = [hrows[0]] + [row[:-1] + [Paragraph(esc(row[-1]), mono)]
+                              for row in hrows[1:]]
+        t = Table(hrows, colWidths=[30 * mm, 13 * mm, 15 * mm, 122 * mm])
         t.setStyle(TableStyle([
             ("GRID", (0, 0), (-1, -1), 0.3, rl_colors.HexColor("#B0BEC5")),
             ("BACKGROUND", (0, 0), (-1, 0), rl_colors.HexColor("#CFD8DC")),
@@ -2527,6 +2616,11 @@ class ForensicEngine:
 
     #: Every field a position fix carries, with its heading. One list, as
     #: ENTRY_FIELDS, so every location format carries the same columns.
+    #: Fields a carved fix's record may not keep; a KML placemark states
+    #: "not recovered" for them rather than leaving them out.
+    _CARVE_MAY_LACK = frozenset(("RecordTimeUTC", "EntryId", "ContainerId",
+                                 "ContainerType"))
+
     LOCATION_FIELDS = [
         ("FixTimestamp", "Fix time — device said (UTC)"),
         ("RecordTimeUTC", "Cache wrote (UTC)"),
@@ -2713,10 +2807,15 @@ class ForensicEngine:
                 when = str(fix.get("FixTimestamp")
                            or fix.get("RecordTimeUTC") or "")
                 acc = fix.get("AccuracyMetres")
-                desc = "\n".join(
-                    "%s: %s" % (h, self._loc_value(fix, k))
-                    for k, h in self.LOCATION_FIELDS
-                    if str(self._loc_value(fix, k)) != "")
+                lines = []
+                for k, h in self.LOCATION_FIELDS:
+                    value = str(self._loc_value(fix, k))
+                    if value != "":
+                        lines.append("%s: %s" % (h, value))
+                    elif style == "carved" and k in self._CARVE_MAY_LACK:
+                        # Stated, as on screen, rather than left out.
+                        lines.append("%s: not recovered" % h)
+                desc = "\n".join(lines)
                 out.append("<Placemark>")
                 out.append("<name>%s</name>" % esc(
                     "%s%s" % (when or "undated",

@@ -217,6 +217,44 @@ def _normalise_carved(record, containers_meta=None, container_types=None):
         return record
 
 
+def attribute_page_owners(carved, structured, objid_of_page, live_owner):
+    """Give each string carved from a database page the container its page
+    belongs to, in place, with how that was found in ContainerFrom.
+
+    `objid_of_page(pgno)` is the page header's objidFDP (the B-tree that
+    owns the page); `live_owner` maps a listed container's objid to its
+    ContainerId. A page whose tree is no longer listed is named by the
+    reconstructed records found on pages of the same tree, when they all
+    name one container. A carve that already has a container, or whose
+    page settles nothing, is left as it is.
+    """
+    named = {}
+    for rec in structured:
+        oid = objid_of_page(rec.get("Page"))
+        cid = rec.get("ContainerId")
+        if oid is None or oid in live_owner or cid is None:
+            continue
+        named.setdefault(oid, set()).add(cid)
+    for art in carved:
+        if art.get("ContainerId") is not None:
+            continue
+        oid = objid_of_page(art.get("Page"))
+        if oid in live_owner:
+            cid = live_owner[oid]
+            art["ContainerId"] = cid
+            art["ContainerFrom"] = (
+                "Inferred from the database page the text was carved from: "
+                "that page belongs to Container_%s." % cid)
+        elif oid in named and len(named[oid]) == 1:
+            cid = next(iter(named[oid]))
+            art["ContainerId"] = cid
+            art["ContainerFrom"] = (
+                "Inferred from the database page the text was carved from: "
+                "that page belonged to a container no longer listed, and "
+                "every record reconstructed from the same container's pages "
+                "names container %s." % cid)
+
+
 def subsume_fragments(artifacts: list) -> list:
     """Fold partial carves into the fullest version of the same string.
 
@@ -637,6 +675,56 @@ class RecoveryEngine:
             return {"error": str(e)}
 
     # ── Combined ──────────────────────────────────────────────────────
+
+    def attribute_carved_pages(self, db):
+        """Name the container of every string carved from a database page,
+        from the page's owner (see attribute_page_owners). Runs after
+        carve_database_slack and carve_structured_records."""
+        page_size = db.page_size
+        cache = {}
+
+        def objid_of_page(pgno):
+            if pgno is None:
+                return None
+            if pgno not in cache:
+                try:
+                    cache[pgno] = db.page(int(pgno)).header.objidFDP
+                except Exception:
+                    cache[pgno] = None
+            return cache[pgno]
+
+        live_owner = {}
+        try:
+            tables = list(db.tables())
+        except Exception as exc:
+            # An addition to recovery, never a reason to lose it.
+            self.decision_log.append(
+                "Carved text was not given a container from its page: the "
+                "table catalog could not be read (%s)." % exc)
+            return
+        for table in tables:
+            m = re.match(r"Container_(\d+)$", getattr(table, "name", "") or "")
+            if m:
+                oid = objid_of_page(getattr(table, "root_page", None))
+                if oid is not None:
+                    live_owner[oid] = int(m.group(1))
+        structured = []
+        for rec in self.structured_records:
+            page = rec.get("Page")
+            if page is None and rec.get("Offset") is not None:
+                page = int(rec["Offset"]) // page_size
+            structured.append({"Page": page,
+                               "ContainerId": rec.get("ContainerId")})
+        before = sum(1 for a in self.page_artifacts
+                     if a.get("ContainerId") is not None)
+        attribute_page_owners(self.page_artifacts, structured, objid_of_page,
+                              live_owner)
+        given = sum(1 for a in self.page_artifacts
+                    if a.get("ContainerId") is not None) - before
+        self.decision_log.append(
+            "%d of %d string(s) carved from database pages were given a "
+            "container inferred from the page they were carved from; the "
+            "rest stay not determinable." % (given, len(self.page_artifacts)))
 
     def set_container_metadata(self, containers_meta, container_types=None):
         """Give carving the container table and type map, so a carved record

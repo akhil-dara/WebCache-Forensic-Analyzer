@@ -511,6 +511,90 @@ def strip_account_prefix_local(url: str) -> str:
     return split_history_url(url or "").get("clean_url", url or "")
 
 
+def decode_logtime(logtime) -> Optional[datetime]:
+    """An ESE LOGTIME from the database header as an aware datetime, or
+    None when it was never set (all zero). Its milliseconds are split
+    across two bytes: the low byte holds seven bits, the high byte the
+    rest. A time not flagged UTC is returned without a zone, since the
+    header does not say which zone it is on."""
+    try:
+        year = int(logtime.bYear)
+        month, day = int(logtime.bMonth), int(logtime.bDay)
+        if not (year and month and day):
+            return None
+        millis = (int(getattr(logtime, "bMillisecondsHigh", 0)) * 128
+                  + int(getattr(logtime, "bMillisecondsLow", 0)))
+        value = datetime(1900 + year, month, day, int(logtime.bHours),
+                         int(logtime.bMinutes), int(logtime.bSeconds),
+                         min(millis, 999) * 1000)
+    except (AttributeError, TypeError, ValueError):
+        return None
+    return (value.replace(tzinfo=timezone.utc)
+            if int(getattr(logtime, "fTimeIsUTC", 0)) else value)
+
+
+def header_times(header) -> dict:
+    """The times the database header records about the file itself: when
+    it was created, last opened (attached), last left consistent (closed
+    cleanly), last detached and last repaired, with the repair count."""
+    sign = getattr(header, "signDb", None)
+
+    def read(name, holder=header):
+        logtime = getattr(holder, name, None) if holder is not None else None
+        return decode_logtime(logtime) if logtime is not None else None
+
+    try:
+        repairs = int(getattr(header, "ulRepairCount", 0) or 0)
+    except (TypeError, ValueError):
+        repairs = None
+    return {
+        "created": read("logtimeCreate", sign),
+        "last_attach": read("logtimeAttach"),
+        "last_consistent": read("logtimeConsistent"),
+        "last_detach": read("logtimeDetach"),
+        "last_repair": read("logtimeRepair"),
+        "repair_count": repairs,
+    }
+
+
+def _header_stamp(value):
+    if value is None:
+        return "Never recorded"
+    text = value.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    return text + (" UTC" if value.tzinfo is not None else
+                   " (zone not stated in the header)")
+
+
+def header_time_rows(times):
+    """The header's own times about the file, as (label, value, tooltip);
+    none when the header was not read."""
+    if not times:
+        return []
+    repairs = times.get("repair_count")
+    if repairs == 0:
+        repaired = "Never (repair count 0)"
+    elif repairs is None:
+        repaired = "Not readable"
+    else:
+        repaired = "%d time%s; last %s" % (
+            repairs, "" if repairs == 1 else "s",
+            _header_stamp(times.get("last_repair")))
+    return [
+        ("Created (header)", _header_stamp(times.get("created")),
+         "When this database file was created, from its header signature."),
+        ("Last opened (header)", _header_stamp(times.get("last_attach")),
+         "When the database was last attached (opened for use)."),
+        ("Last clean close (header)", _header_stamp(times.get("last_consistent")),
+         "When the database was last left consistent. An open later than "
+         "this with a dirty state means it was not closed cleanly after "
+         "that open."),
+        ("Last detached (header)", _header_stamp(times.get("last_detach")),
+         "When the database was last detached."),
+        ("Repaired (header)", repaired,
+         "Whether the database was ever repaired, which rewrites it."),
+    ]
+
+
 def normalise_record(record: dict, containers_meta=None,
                      container_types=None) -> dict:
     """Give a carved record the same fields a live one has.
@@ -591,6 +675,25 @@ def normalise_record(record: dict, containers_meta=None,
                     # "Cookies".
                     ctype = ctype or cname
                 break
+    # A dated-history container Windows has since dropped is no longer in
+    # the Containers table, but the record's own URL prefix names it.
+    if (not ctype and own_meta is None and parts["prefix_type"] == "MSHist"
+            and parts["mshist_from"] and parts["mshist_to"]):
+        ctype = "History"
+        for meta in containers_meta or ():
+            name = str(meta.get("Name") or "")
+            if name.startswith("MSHist"):
+                ctype = ((container_types or {}).get(meta.get("ContainerId"))
+                         or ctype)
+                break
+        cname = "MSHist01%s%s" % (parts["mshist_from"].replace("-", ""),
+                                  parts["mshist_to"].replace("-", ""))
+        record.setdefault(
+            "ContainerFrom",
+            "The container is no longer listed in the Containers table; its "
+            "type and name are derived from the dated-history prefix in the "
+            "record's own URL (%s to %s)."
+            % (parts["mshist_from"], parts["mshist_to"]))
     record["ContainerType"] = ctype
     record["ContainerName"] = cname
 
@@ -678,6 +781,8 @@ class WebCacheParser:
         # Forensic integrity / provenance
         self.source_hashes = {}      # filename -> sha256 hex
         self.db_state = None         # 1=clean, 2=dirty shutdown
+        #: The header's own times (header_times()); {} until opened.
+        self.header_times = {}
         self.parse_stats = {"parsed": 0, "skipped": 0, "errors": 0}
         self.decision_log = []       # transparent per-table processing notes
         #: [(table_name, reason), ...] for the LAST search_all_tables call
@@ -712,6 +817,10 @@ class WebCacheParser:
                 self.db_state = int(self.db.header.dbstate)
             except (AttributeError, TypeError, ValueError):
                 self.db_state = None
+            try:
+                self.header_times = header_times(self.db.header)
+            except Exception:
+                self.header_times = {}
             if known_hashes is not None:
                 # The Open dialog has already hashed every file in scope
                 # (EvidenceSet.hashes, keyed by full path), so the files
@@ -730,8 +839,9 @@ class WebCacheParser:
                 f"SHA-256 {self.source_hashes.get(os.path.basename(db_path), '')}")
             if self.db_state == 2:
                 self.decision_log.append(
-                    "Dirty state read directly (no esentutl recovery run) — "
-                    "preserves records a soft recovery could destroy.")
+                    "Dirty state read directly with dissect.esedb (no "
+                    "esentutl recovery run); the database file is not "
+                    "written to.")
             return True
         except Exception as e:
             self.db = None
@@ -1412,6 +1522,7 @@ class WebCacheParser:
             "total_entries": len(self.all_entries),
             "db_state": self.db_state,
             "db_state_text": state_txt,
+            "header_times": dict(self.header_times),
             "sha256": self.source_hashes.get(
                 os.path.basename(self.db_path or ""), ""),
             "source_hashes": dict(self.source_hashes),

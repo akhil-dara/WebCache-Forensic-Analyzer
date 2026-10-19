@@ -12,6 +12,7 @@ handling" scope statement, the same sentence every export carries.
 """
 import os
 
+from ..engine.ese_parser import header_time_rows
 from ..engine.evidence_model import SCOPE_STATEMENTS
 
 #: The read-only guarantee: mode 'rb', and no ESE soft recovery.
@@ -70,7 +71,7 @@ def hash_rows(info):
 
 
 def source_integrity_rows(info):
-    """The Source Integrity card's six fields, in a fixed order, each a
+    """The Source Integrity card's fields, in a fixed order, each a
     dict with "label", "value" and "tooltip" ("" except on the read-only
     guarantee row).
     """
@@ -91,6 +92,7 @@ def source_integrity_rows(info):
         ("Tables skipped", format(stats.get("skipped", 0), ","), ""),
         ("Record errors", format(stats.get("errors", 0), ","), ""),
     ]
+    fields[1:1] = header_time_rows(info.get("header_times"))
     return [{"label": label, "value": value, "tooltip": tooltip}
             for label, value, tooltip in fields]
 

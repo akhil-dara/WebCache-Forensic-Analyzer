@@ -137,10 +137,13 @@ def test_visit_count_prefers_the_sps_id6_count_over_access_count():
     assert rows[0]["VisitCount"] == 7
 
 
-def test_visit_count_falls_back_to_access_count_when_sps_is_absent():
+def test_cache_touches_are_never_offered_as_visits():
+    """Without the browser's visit counter there is no visit count; the
+    AccessCount is shown as cache touches, under its own name."""
     rows = history_rows_from_parser(_StubParser(
         [_entry(SPS_VisitCount=None, AccessCount=42)]))
-    assert rows[0]["VisitCount"] == 42
+    assert rows[0]["VisitCount"] is None
+    assert rows[0]["CacheTouches"] == 42
 
 
 def test_accessed_utc_is_a_real_datetime_not_a_preformatted_string():
@@ -501,7 +504,8 @@ def test_source_is_blank_for_a_live_file_access_record():
 def test_file_access_rows_carry_every_key_the_view_reads():
     rows = file_access_rows_from_parser(_StubParser([_fa_entry()]))
     row = rows[0]
-    for key in ("ModifiedTime", "AccessedLocal", "VisitCountBest", "CleanUrl",
+    for key in ("ModifiedTime", "AccessedLocal", "VisitCount", "CacheTouches",
+                "CleanUrl",
                "Origin", "Source", "FileSize", "ContainerId", "ContainerName",
                "EntryId", "AccessedTime", "CreationTime"):
         assert key in row, "FileAccessView's file-access columns read %r" % key
@@ -536,16 +540,16 @@ def test_accessed_local_is_none_when_no_sps_blob_was_present():
     assert rows[0]["AccessedLocal"] is None
 
 
-def test_visit_count_best_prefers_sps_over_access_count():
+def test_opens_and_cache_touches_are_separate_counters():
     rows = file_access_rows_from_parser(_StubParser(
         [_fa_entry(SPS_VisitCount=7, AccessCount=99)]))
-    assert rows[0]["VisitCountBest"] == 7
+    assert (rows[0]["VisitCount"], rows[0]["CacheTouches"]) == (7, 99)
 
 
-def test_visit_count_best_falls_back_to_access_count():
+def test_cache_touches_are_never_offered_as_opens():
     rows = file_access_rows_from_parser(_StubParser(
         [_fa_entry(SPS_VisitCount=None, AccessCount=42)]))
-    assert rows[0]["VisitCountBest"] == 42
+    assert (rows[0]["VisitCount"], rows[0]["CacheTouches"]) == (None, 42)
 
 
 def test_clean_url_is_the_local_file_path():

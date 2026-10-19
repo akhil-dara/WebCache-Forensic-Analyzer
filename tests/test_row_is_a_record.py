@@ -271,18 +271,14 @@ def test_a_record_with_no_timestamp_at_all_states_no_basis():
     assert rows[0]["AccessedUtcBasis"] == ""
 
 
-def test_the_visit_count_source_is_the_engines_own_wording():
-    """Never re-typed at this layer -- forensic_engine's constants, so
-    the screen and the export cannot say it two ways."""
-    rows = evidence_loader.history_rows_from_parser(
-        _StubParser(all_entries=[_history_entry()]))
-    assert rows[0]["VisitCountSource"] is forensic_engine.VISIT_SOURCE_SPS
-
+def test_each_counter_is_a_row_key_under_its_own_name():
+    """The browser's visit counter and the cache touches are separate
+    keys; neither is ever read as the other."""
     rows = evidence_loader.history_rows_from_parser(_StubParser(all_entries=[
         _history_entry(SPS_VisitCount=None)]))
-    assert rows[0]["VisitCount"] == 9
-    assert rows[0]["VisitCountSource"] is (
-        forensic_engine.VISIT_SOURCE_ACCESS_COUNT)
+    assert rows[0]["VisitCount"] is None
+    assert rows[0]["CacheTouches"] == 9
+    assert "VisitCountSource" not in rows[0]
 
 
 def test_a_live_history_row_states_the_container_it_is_in():

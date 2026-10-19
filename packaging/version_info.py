@@ -12,7 +12,9 @@ EXE_NAME = "WebCacheAnalyzer.exe"
 
 
 def _numbers(version):
-    parts = [int(p) for p in version.split(".")[:4]]
+    """The four integers Windows' file version holds: the release number's
+    numeric parts, so "5.1.0.dev0" gives (5, 1, 0, 0)."""
+    parts = [int(p) for p in version.split(".") if p.isdigit()][:4]
     return tuple(parts + [0] * (4 - len(parts)))
 
 

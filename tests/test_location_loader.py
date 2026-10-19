@@ -743,3 +743,21 @@ def test_a_fix_with_a_cache_time_shows_the_time_itself():
     fix = location_loader.position_fixes([_live(_url())])[0]
     assert fix["RecordTimeShown"] == fix["RecordTimeUtc"]
     assert isinstance(fix["RecordTimeShown"], datetime.datetime)
+
+
+def test_a_carved_placemark_says_what_was_not_recovered(tmp_path):
+    """A recovered fix's KML description left out the fields a carve does
+    not keep, so "Cache wrote" was simply absent where the screen states
+    "(not recovered)". The placemark now states it; a live one is
+    unchanged."""
+    fixes = location_loader.position_fixes(
+        [_live(_url())], [_artifact(_url(lat="48.8566", lon="2.3522"))])
+    out = tmp_path / "fixes.kml"
+    ForensicEngine().export_location_kml(fixes, str(out))
+    text = out.read_text(encoding="utf-8")
+    carved = text[text.index("<name>Recovered from deleted"):]
+    live = text[text.index("<name>Live records"):text.index(
+        "<name>Recovered from deleted")]
+    for label in ("Cache wrote (UTC)", "EntryId", "Container ID"):
+        assert "%s: not recovered" % label in carved, label
+        assert "%s: not recovered" % label not in live, label

@@ -29,7 +29,8 @@ def test_columns_match_the_spec(qtbot):
     v = DomainsView()
     qtbot.addWidget(v)
     keys = [c.key for c in v.COLUMNS]
-    assert keys == ["Domain", "Records", "Carved", "OnlyCarved", "FileSize",
+    assert keys == ["Domain", "Records", "Visits", "Carved", "OnlyCarved",
+                    "FileSize",
                     "FirstSeen", "LastSeen", "ContainerType", "AccessCount",
                     "IsInPrivate"]
 

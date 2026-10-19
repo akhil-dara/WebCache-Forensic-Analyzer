@@ -339,13 +339,17 @@ def test_a_record_row_states_which_column_its_time_came_from():
     assert row["_kind"] in record_kinds.ALL
 
 
-def test_a_record_row_names_the_counter_its_visit_count_came_from():
-    entry = _entry(EntryId=8, SPS_VisitCount=4)
-    inputs = timeline_loader.timeline_inputs([entry])
+def test_a_record_rows_counters_are_kept_apart():
+    """The visit count is the browser's counter only; cache touches are a
+    column of their own (test_visits_and_cache_touches_never_merged.py)."""
+    entries = [_entry(EntryId=8, SPS_VisitCount=4, AccessCount=11),
+               _entry(EntryId=9, AccessCount=6)]
+    inputs = timeline_loader.timeline_inputs(entries)
     period = timeline_loader.period_rows(inputs, "day")[0]
-    row = timeline_loader.record_rows(period, inputs)[0]
-    assert row["VisitCount"] == 4
-    assert "SPS" in row["VisitCountSource"]
+    rows = {r["_record"]["EntryId"]: r
+            for r in timeline_loader.record_rows(period, inputs)}
+    assert (rows[8]["VisitCount"], rows[8]["CacheTouches"]) == (4, 11)
+    assert (rows[9]["VisitCount"], rows[9]["CacheTouches"]) == (None, 6)
 
 
 # --- the count line -------------------------------------------------------

@@ -20,7 +20,7 @@ machine, and one of the hardest to read correctly.
   logged on, so an acquired copy is nearly always in a dirty-shutdown state,
   with recent changes still in its transaction logs. A reader that requires
   a clean database, or repairs one before reading it, either fails or
-  destroys the very records an examiner needs.
+  writes to the evidence file before reading it.
 - **Deletion is not erasure.** Records removed by the cache remain in
   unallocated database pages and in the transaction logs. On a typical
   machine many times more history survives there than in the live tables,
@@ -40,7 +40,7 @@ This tool was written to meet those requirements together, in one place.
 
 ## What it does
 
-- **Reads dirty databases as they are.** No repair, no soft recovery, no
+- **Reads dirty databases as they are**, using dissect.esedb. No repair, no soft recovery, no
   writes: the evidence folder is never modified, and every file read is
   hashed (SHA-256) when it is opened.
 - **Recovers deleted and unflushed records** from unallocated pages and the
@@ -85,8 +85,8 @@ This tool was written to meet those requirements together, in one place.
 
 - [How it works](docs/architecture.md): the components, the path from
   evidence to report, and the rules the design keeps.
-- [Validation](docs/validation.md): the parser checked table by table and
-  cell by cell against three independent ESE readers.
+- [Validation](docs/validation.md): the database as read checked table by
+  table and cell by cell against an independent ESE implementation.
 - [Location in WebCacheV01.dat](docs/how-location-is-found.md): where
   positions come from, how they are recovered, and what they support.
 
@@ -130,6 +130,20 @@ python -m webcache
 
 Requires Python 3.13 or later. To run the tests: `pip install ".[dev]"`,
 then `pytest`.
+
+## Built on
+
+- ESE page and record decoding: [dissect.esedb](https://github.com/fox-it/dissect.esedb)
+  by Fox-IT (Apache-2.0)
+- Interface: Qt for Python (PySide6, LGPL-3.0)
+- Exports: openpyxl (MIT) and ReportLab (BSD)
+
+Everything above the ESE layer is this project's own: read-only handling and
+hashing, recovery from unallocated pages and the transaction logs, container
+attribution of recovered records, property-store, download and header-time
+decoding, the clock model, the analysis views and every export. See
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for every library and its
+licence.
 
 ## License
 

@@ -57,13 +57,17 @@ class HistoryView(RecordsView):
                   field="AccessedUtc"),
             Column("AccessedLocal", "Last visit (LOCAL)", 165,
                   kind="time_local", field="AccessedLocal"),
-            Column("VisitCount", "Visits", 70, kind="num", field="VisitCount"),
+            Column("VisitCount", "Visits (property store)", 90, kind="num",
+                   field="SPS_VisitCount"),
             Column("CleanUrl", "Address", 460, kind="url", field="CleanUrl"),
             # The other record of the same visit; blank when there is none.
             Column("SameVisit", "Same visit as", 220, kind="text"),
             # Repeated carves of one record; blank on a live row and on a
             # unique carve.
             Column("Copies", "Copies", 100, kind="text"),
+            # Touches of the cache entry, never visits.
+            Column("CacheTouches", "Cache touches", 80, kind="num",
+                   field="AccessCount"),
             Column("Domain", "Domain", 170, kind="domain",
                   on_click=lambda row: self.drillRequested.emit("domains", row)),
             Column("Title", "Title", 240, kind="text"),

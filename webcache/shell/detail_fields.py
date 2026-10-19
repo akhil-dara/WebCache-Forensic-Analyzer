@@ -208,8 +208,9 @@ _COMMON = (
     ("MSHistTo", G_WHAT, "MSHist range to", "MSHistTo", "text"),
 
     # -- what it says happened ----------------------------------------
-    ("VisitCount", G_SAYS, "Visits", "VisitCountBest", "num"),
-    ("VisitCountBest", G_SAYS, "Visits (best available)", "VisitCountBest", "num"),
+    ("VisitCount", G_SAYS, "Visits (property store)", "SPS_VisitCount", "num"),
+    ("CacheTouches", G_SAYS, "Cache touches (AccessCount)", "AccessCount",
+     "num"),
     ("SPS_VisitCount", G_SAYS, "Visit count (SPS id 6)", "SPS_VisitCount", "num"),
     ("AccessCount", G_SAYS, "Cache touches (AccessCount)", "AccessCount", "num"),
     ("SyncCount", G_SAYS, "Sync count", "SyncCount", "num"),
@@ -256,6 +257,8 @@ _COMMON = (
     ("ContainerId", G_WHERE_DB, "Container id", "ContainerId", "num"),
     ("ContainerName", G_WHERE_DB, "Container name", "ContainerName", "text"),
     ("ContainerType", G_WHERE_DB, "Container type", "ContainerType", "text"),
+    ("ContainerFrom", G_WHERE_DB, "How the container was found",
+     "ContainerFrom", "text"),
     ("TableName", G_WHERE_DB, "ESE table", "TableName", "text"),
     ("Table", G_WHERE_DB, "ESE table", None, "text"),
     ("PartitionId", G_WHERE_DB, "Partition", None, "text"),
@@ -317,6 +320,8 @@ _BY_KIND = {
     K_COOKIE: (
         ("Name", G_WHAT, "Cookie name", "CookieName", "text"),
         ("Value", G_SAYS, "Cookie value", "CookieValue", "text"),
+        ("ValueDecoded", G_SAYS, "Cookie value (percent-decoded)",
+         "CookieValueDecoded", "text"),
         ("Path", G_WHAT, "Path", None, "text"),
         ("IsSecure", G_FLAGS, "Secure (HTTPS only)", None, "flag"),
         ("Expires", G_WHEN, "Expires (UTC)", "Expires", "time"),
@@ -356,6 +361,9 @@ _BY_KIND = {
     K_DOMAIN: (
         ("Domain", G_WHAT, "Domain", "Domain", "text"),
         ("Records", G_SAYS, "Records in this aggregate", None, "num"),
+        ("Visits", G_SAYS, "Visits (property store)", "DomainVisits", "num"),
+        ("VisitsAddresses", G_SAYS, "Addresses with a visit count", None,
+         "num"),
         ("Carved", G_SAYS, "Of those, carved", None, "num"),
         ("OnlyCarved", G_SAYS, "Seen only in carved records", None, "flag"),
         ("FileSize", G_SAYS, "Total cached size", "FileSize", "size"),
@@ -456,13 +464,10 @@ _FIX_FIELDS = (
 #: {source key: (host key, prefix)}
 _NOTES = {
     "AccessedUtcBasis": ("AccessedUtc", "from %s"),
-    "VisitCountSource": ("VisitCount", "counted from %s"),
 }
 #: The same note key hosted by a different field on a different kind.
 _NOTES_BY_KIND = {
-    K_FILE_ACCESS: {"VisitCountSource": ("VisitCountBest", "counted from %s")},
-    K_CARVED_STRUCT: {"AccessedUtcBasis": ("AccessedUtc", "from %s"),
-                      "VisitCountSource": ("VisitCount", "counted from %s")},
+    K_CARVED_STRUCT: {"AccessedUtcBasis": ("AccessedUtc", "from %s")},
 }
 
 #: (kind, key) pairs where an empty value means "this does not exist for
@@ -799,6 +804,12 @@ def fields_for(row, all_members=False):
     carved = (str(row.get("Origin") or "").startswith("Carved")
               or kind in (K_CARVED_STRUCT, K_CARVED_STRING, K_TOMBSTONE))
     source = _merged_source(row)
+    # Each counter once, under its own name: a row's copy of a record
+    # field replaces the record's.
+    for row_key, record_key in _ECHOES:
+        if (row_key in source and record_key in source
+                and source[record_key] == source[row_key]):
+            del source[record_key]
     consumed = set()
     buckets = {name: [] for name in GROUPS}
 
@@ -1315,6 +1326,13 @@ _LOCAL_CLOCK_FIELDS = frozenset({"KeyTimestampUTC", "ModifiedTime",
                                  "ModifiedTime_rfc"})
 
 
+#: (row key, record key) pairs holding the same value under two names.
+_ECHOES = (("VisitCount", "SPS_VisitCount"), ("CacheTouches", "AccessCount"))
+
+#: Fields that name a record's container.
+_CONTAINER_FIELDS = frozenset(("ContainerId", "ContainerName", "ContainerType"))
+
+
 def basis_badge(field_key, carved=None, record=None):
     """(short, tooltip) for a catalogued field, or (None, "") for an
     uncatalogued one.
@@ -1333,6 +1351,15 @@ def basis_badge(field_key, carved=None, record=None):
         return None, ""
     if field_key == "Origin" and carved is False:
         return evidence_model.BASIS_SHORT[evidence_model.OBSERVED],             _LIVE_ORIGIN_TOOLTIP
+    if field_key in _CONTAINER_FIELDS and isinstance(record, dict):
+        # A container the record did not store, identified another way:
+        # inferred, with how it was found.
+        inner = record.get("_record")
+        how = record.get("ContainerFrom") or (
+            inner.get("ContainerFrom") if isinstance(inner, dict) else None)
+        if how:
+            short = evidence_model.BASIS_SHORT[evidence_model.INFERRED]
+            return short, "%s (Inferred) — %s" % (short, how)
     if isinstance(record, dict) and local_clock.is_mshist_record(record):
         if field_key in _LOCAL_CLOCK_FIELDS and record.get("ModifiedTime_raw"):
             short = evidence_model.BASIS_SHORT[evidence_model.INFERRED]

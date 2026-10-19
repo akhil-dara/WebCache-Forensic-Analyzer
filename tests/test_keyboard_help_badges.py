@@ -38,7 +38,9 @@ def test_a_headings_tooltip_explains_its_badge(view):
     model = view.table.model()
     section = [c.key for c in model.columns].index("VisitCount")
     tip = model.headerData(section, Qt.Horizontal, Qt.ToolTipRole)
-    assert "DER (Derived)" in tip
+    # The browser's own visit counter: its meaning is documented outside
+    # Microsoft, so the badge is INF and the tooltip says why.
+    assert "INF (Inferred)" in tip
 
 
 def test_a_badge_past_the_viewport_edge_moves_in_or_is_not_drawn(view):
@@ -57,7 +59,8 @@ def win(qtbot):
 
 
 def test_help_explains_the_tool_the_keys_and_the_badges(win):
-    assert "5.0" in win.help_about_action.data()
+    from webcache import provenance
+    assert provenance.TOOL_VERSION in win.help_about_action.data()
     dialog = win._show_help("About", win.help_about_action.data())
     assert dialog.isVisible()
     assert "Alt+Left" in win.help_shortcuts_action.data()

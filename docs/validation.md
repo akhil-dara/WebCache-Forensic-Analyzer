@@ -1,6 +1,10 @@
 # Validation
 
-How the parser's output was verified, and what the verification found.
+How the database as this tool reads it was verified, and what the
+verification found. ESE pages and records are decoded by
+[dissect.esedb](https://github.com/fox-it/dissect.esedb). This tool builds
+the record model on that layer, and this check covers the two together:
+every value as the tool reports it, against an independent implementation.
 
 ## Method
 
@@ -29,7 +33,7 @@ was read from a copy, verified by SHA-256 before and after reading.
 
 The only cells that differ are in the database's own system catalogue
 (`MSysObjects` and its shadow copy), in five bookkeeping columns, and in
-each case the record's bytes show this tool's reading is the one the format
+each case the record's bytes show this reading is the one the format
 specifies (below).
 
 ## How an empty fixed column is reported
@@ -38,7 +42,8 @@ ESE marks a fixed column as NULL in two ways: the column lies beyond the
 last fixed column the record contains, or the record's null bitmap has the
 column's bit set. When the bit is set, the column's slot still holds bytes:
 a filler pattern (`0x2A`, the character `*`, repeated). Those bytes are not
-a value. This tool honours the null bit and reports the column as empty.
+a value. dissect.esedb honours the null bit, and the column is reported as
+empty.
 
 | Column | Cells with the null bit set | Filler bytes in the slot |
 |---|---|---|

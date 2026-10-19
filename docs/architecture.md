@@ -38,7 +38,7 @@ every rule in it can be tested on its own.
 
 | Component | Responsibility |
 |---|---|
-| `ese_parser` | Opens the database read-only, hashes it and its sibling files, reads every table in its dirty state without repair, records each parsing decision in a log, and recovers the machine's time zone from the evidence |
+| `ese_parser` | Opens the database read-only, hashes it and its sibling files, reads every table in its dirty state without repair through dissect.esedb, records each parsing decision in a log, and recovers the machine's time zone from the evidence |
 | `ese_records` | Decides what counts as a record. B-tree nodes too short to hold a record header are refused, as other ESE readers refuse them |
 | `sps_decoder`, `download_decoder`, `blob_reader` | Decode the binary values a generic viewer shows as hex: property stores (visit counts, local-clock visit times), download records, headers |
 | `local_clock` | Tells which containers store the machine's local time rather than UTC, and converts them using the recovered zone |

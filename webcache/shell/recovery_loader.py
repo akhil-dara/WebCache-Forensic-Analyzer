@@ -74,7 +74,6 @@ def carved_history_rows(engine):
         # engine/local_clock.py.
         accessed_local = local_clock.local_naive(entry)
 
-        visit_count, visit_source = forensic_engine.visit_count_best(entry)
 
         # forensic_engine.carved_inprivate: the live bit rule, and not
         # "No" when the carve did not recover Flags.
@@ -85,7 +84,11 @@ def carved_history_rows(engine):
             "Title": entry.get("SPS_PageTitle") or "",
             "AccessedUtc": accessed_utc,
             "AccessedLocal": accessed_local,
-            "VisitCount": visit_count,
+            # The browser's visit counter (SPS id 6) only, None when the
+            # record stores none; cache touches are their own column and
+            # are never offered as visits.
+            "VisitCount": entry.get("SPS_VisitCount"),
+            "CacheTouches": entry.get("AccessCount"),
             "Domain": forensic_engine.extract_domain(
                 entry.get("Url") or entry.get("CleanUrl") or ""),
             # The same bit test _parse_record() uses for a live record --
@@ -117,7 +120,6 @@ def carved_history_rows(engine):
             "_record": entry,
             "_kind": K_CARVED_STRUCT,
             "AccessedUtcBasis": basis,
-            "VisitCountSource": visit_source,
             # A row key rather than left on _record: it decides whether
             # this row's URL can be read as a recorded URL at all.
             # normalise_record computes it for every carved record
@@ -179,7 +181,6 @@ def carved_file_access_rows(engine):
         if not entry.get("IsLocalFile"):
             continue
 
-        visit_best, visit_source = forensic_engine.visit_count_best(entry)
         _raw_ts, basis = forensic_engine.key_timestamp(entry)
 
         rows.append({
@@ -187,7 +188,10 @@ def carved_file_access_rows(engine):
             "ModifiedTime": filetime_to_dt(
                 local_clock.utc_raw(entry, "ModifiedTime_raw")),
             "AccessedLocal": local_clock.local_naive(entry),
-            "VisitCountBest": visit_best,
+            # Each counter under its own name, never merged: the browser's
+            # visit counter (SPS id 6) and the cache entry's touches.
+            "VisitCount": entry.get("SPS_VisitCount"),
+            "CacheTouches": entry.get("AccessCount"),
             "CleanUrl": entry.get("CleanUrl") or entry.get("Url") or "",
             # derived, beside the stored value.
             "LocalPath": url_intel.windows_path_from_file_url(
@@ -219,7 +223,6 @@ def carved_file_access_rows(engine):
             # live side.
             "_record": entry,
             "_kind": K_CARVED_STRUCT,
-            "VisitCountSource": visit_source,
             "ModifiedTimeBasis": basis,
             "SameVisit": local_clock.same_visit_text(entry),
         })
@@ -597,6 +600,9 @@ class RecoveryWorker(QThread):
                 "records…")
             engine.carve_structured_records(
                 parser.db, parser.db_path, progress_callback=self._struct_progress)
+            # A string carved from a database page takes the container its
+            # page belongs to (stated as inferred, with how).
+            engine.attribute_carved_pages(parser.db)
 
             if self.isInterruptionRequested():
                 return

@@ -208,9 +208,21 @@ def test_the_version_resource_states_the_application_version():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     text = module.version_text(provenance.TOOL_VERSION)
-    assert "filevers=(5, 0, 0, 0)" in text
+    assert "filevers=(5, 1, 0, 0)" in text
     for field in ("CompanyName", "FileDescription", "ProductName",
                   "LegalCopyright", "OriginalFilename", "ProductVersion"):
         assert "StringStruct('%s'" % field in text
     assert "StringStruct('ProductVersion', '%s')" % provenance.TOOL_VERSION \
         in text
+
+
+def test_a_development_version_gives_numeric_file_version_fields():
+    """Windows' file version is four integers; a development version such
+    as 5.1.0.dev0 keeps its full text in ProductVersion and FileVersion."""
+    spec = importlib.util.spec_from_file_location("version_info",
+                                                  VERSION_INFO)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    text = module.version_text("5.1.0.dev0")
+    assert "filevers=(5, 1, 0, 0)" in text
+    assert "StringStruct('ProductVersion', '5.1.0.dev0')" in text

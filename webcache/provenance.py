@@ -11,7 +11,7 @@ import datetime
 import hashlib
 import os
 
-TOOL_VERSION = "5.0.0"
+TOOL_VERSION = "5.1.0.dev0"
 
 #: The six columns that state where a recovered record came from, written
 #: by every export.

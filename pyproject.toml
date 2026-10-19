@@ -1,6 +1,6 @@
 [project]
 name = "webcache-qt"
-version = "5.0.0"
+version = "5.1.0.dev0"
 requires-python = ">=3.13"
 license = "AGPL-3.0-only"
 license-files = ["LICENSE"]

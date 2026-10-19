@@ -94,6 +94,21 @@ function parseDtValue(v) {
   return parseDtText(v.trim());
 }
 
+// record_filter._unit_end: how far past an operand's instant the unit its
+// text names runs, in seconds ("2026-02-16" -> a day less a microsecond),
+// or 0 for an operand naming an exact instant.
+var UNIT_SPANS = [[/^(\d{4}-\d{2}-\d{2}|\d{8})$/, 86400],
+                  [/^\d{4}-\d{2}-\d{2}[ T]\d{2}$/, 3600],
+                  [/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}$/, 60],
+                  [/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$/, 1]];
+function unitEnd(text) {
+  var s = text === null || text === undefined ? "" : String(text).trim();
+  for (var i = 0; i < UNIT_SPANS.length; i++) {
+    if (UNIT_SPANS[i][0].test(s)) return UNIT_SPANS[i][1] - 1e-6;
+  }
+  return 0;
+}
+
 function inFrame(operand, value) {
   // record_filter._in_frame: a typed date with no zone, read against a value
   // on a non-UTC clock, is a date on THAT clock.
@@ -139,6 +154,7 @@ function Condition(op, a, b) {
   this.anchor = null;
   this.rx = null;
   this.aDt = null; this.bDt = null; this.aNum = null; this.bNum = null;
+  this.endSpan = 0;
   if (op === "matches regex" && this.a !== null) {
     try { this.rx = new RegExp(String(this.a), "i"); } catch (e) { this.error = e.message; }
   } else if ((op === "matches pattern" || op === "does not match pattern") && this.a !== null) {
@@ -170,6 +186,9 @@ function Condition(op, a, b) {
       if (swapNum) { this.aNum = bNum; this.bNum = aNum; }
       if (swapDt) { this.aDt = bDt; this.bDt = aDt; }
       if (swapNum || swapDt) { var t = this.a; this.a = this.b; this.b = t; }
+      // An end bound covers the whole unit it names.
+      if (op === "between" && this.bDt) this.endSpan = unitEnd(this.b);
+      else if (op === "<=" && this.aDt) this.endSpan = unitEnd(this.a);
     }
   } else if (op === "in the last N days") {
     var n = pyFloat(this.a);
@@ -224,8 +243,10 @@ Condition.prototype.matchAmbiguous = function (op, v) {
     if (!dt || !this.aDt) return false;
     if (op === "between") {
       if (!this.bDt) return false;
-      return inFrame(this.aDt, dt).instant <= dt.instant && dt.instant <= inFrame(this.bDt, dt).instant;
+      return inFrame(this.aDt, dt).instant <= dt.instant &&
+        dt.instant <= inFrame(this.bDt, dt).instant + this.endSpan;
     }
+    if (op === "<=") return dt.instant <= inFrame(this.aDt, dt).instant + this.endSpan;
     return compareOp(op, dt.instant, inFrame(this.aDt, dt).instant);
   }
   var n = numericValue(v);
@@ -243,7 +264,8 @@ Condition.prototype.describe = function (col) {
   }
   if (op === "is yes" || op === "is no") return "Is " + (op === "is yes" ? "Yes" : "No");
   if (op === "is blank" || op === "is not blank") return op;
-  if (op === "between") return "between " + a + " and " + this.b;
+  if (op === "between") return "between " + a + " and " + (this.endSpan ? "the end of " : "") + this.b;
+  if (op === "<=" && this.endSpan) return "<= the end of \"" + a + "\"";
   if (op === "in the last N days") return "in the last " + a + " days";
   return op + " \"" + a + "\"";
 };

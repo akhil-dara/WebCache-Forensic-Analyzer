@@ -105,6 +105,19 @@ FIELD_PROVENANCE = {
                                  "DOMStore / BackgroundTransfer).",
                         "A convenience grouping created by this tool, not a field "
                         "stored in the database."),
+    "DomainVisits": _f(DERIVED, "Visits to this domain by the browser's own "
+                                "count: the sum of each address's visit "
+                                "count (SPS id 6), each address once -- its "
+                                "live record's count where there is one, else "
+                                "the highest a recovered copy holds. An "
+                                "address with no stored count adds nothing; "
+                                "cache requests are never counted as visits."),
+    "ContainerFrom": _f(INFERRED, "How a recovered record's container was "
+                                  "identified when the Containers table no "
+                                  "longer lists it or the carve did not keep "
+                                  "it: from the record's own dated-history "
+                                  "prefix, or from the owner of the database "
+                                  "page it was carved from."),
     "TableName": _f(DERIVED, "The ESE table holding this record, as Container_<id>.",
                     "Container numbering is machine-specific and must never be "
                     "hard-coded across systems."),
@@ -223,7 +236,12 @@ FIELD_PROVENANCE = {
                        "MSHist container stores this column on the LOCAL clock "
                        "(measured on five exhibits); there it is shown as LOCAL "
                        "and its UTC is derived from the recovered zone, or left "
-                       "blank when no zone was recovered."),
+                       "blank when no zone was recovered. In a Content (cache) "
+                       "container it is the server's last-modified date of "
+                       "what was cached, which can fall years before the "
+                       "cache entry was written; it is not activity on this "
+                       "machine, and such a record is placed in time by "
+                       "AccessedTime, else CreationTime."),
     "ModifiedTimeLocal": _f(OBSERVED, "An MSHist container's ModifiedTime "
                                       "exactly as stored: the machine's "
                                       "LOCAL wall clock.",
@@ -328,6 +346,9 @@ FIELD_PROVENANCE = {
                             "('com.microsoft')."),
     "CookieName": _f(OBSERVED, "Cookie name as stored."),
     "CookieValue": _f(OBSERVED, "Cookie value as stored."),
+    "CookieValueDecoded": _f(DERIVED, "Cookie value with its percent-escapes "
+                                      "decoded; the stored value is Cookie "
+                                      "value."),
     "Expires": _f(OBSERVED, "Expiry timestamp as stored (UTC)."),
     "LastModified": _f(OBSERVED, "Last-modified timestamp as stored (UTC)."),
     "IncludeSubdomains": _f(OBSERVED, "HSTS pin also covers subdomains."),
@@ -379,8 +400,8 @@ SCOPE_STATEMENTS = [
     ("Source handling",
      "The database was opened strictly read-only and parsed directly in its "
      "dirty-shutdown state. No ESE soft recovery (esentutl /r) was performed. "
-     "That step is commonly recommended but mutates the evidence and can destroy "
-     "records that exist only in the dirty state."),
+     "That step is commonly recommended, but it writes to the database file: "
+     "it replays the transaction logs into it and rewrites its header."),
     ("Recovered records",
      "Deleted-record recovery is heuristic signature and structure carving of "
      "unallocated pages and transaction logs. It is NOT ESE engine recovery and "

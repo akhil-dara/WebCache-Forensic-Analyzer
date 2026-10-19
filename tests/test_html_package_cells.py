@@ -125,7 +125,7 @@ def test_canonical_cells_are_what_the_view_csv_writes_for_the_record():
                 for v, f in zip(raw[start:], flags[start:])]
     by_key = dict(zip(forensic_engine.ENTRY_FIELD_KEYS,
                       canonical_cells(record, carved=False)))
-    assert len(by_key) == len(forensic_engine.ENTRY_FIELDS) == 80
+    assert len(by_key) == len(forensic_engine.ENTRY_FIELDS) == 81
     assert ([_strip(by_key[k]) for k, _h in canon]
             == ["" if v is None else str(v) for v in expected])
 

@@ -637,8 +637,16 @@ def windows_path_from_file_url(url):
     if not text.lower().startswith("file:"):
         return ""
     rest = text[5:]
+    if rest.startswith("////"):
+        # file:////server/share and file://///server/share: a UNC path
+        # written after an empty host.
+        return "\\\\" + unquote(rest.lstrip("/")).replace("/", "\\")
     if rest.startswith("///"):
         return unquote(rest[3:]).replace("/", "\\")
     if rest.startswith("//"):
+        host, _sep, path = rest[2:].partition("/")
+        if host.lower() == "localhost":
+            # file://localhost/C:/... names this machine's own drive.
+            return unquote(path).replace("/", "\\")
         return "\\\\" + unquote(rest[2:]).replace("/", "\\")
     return unquote(rest.lstrip("/")).replace("/", "\\")

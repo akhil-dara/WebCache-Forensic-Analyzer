@@ -37,6 +37,33 @@ def _inprivate(entry):
     return forensic_engine.carved_inprivate(entry)
 
 
+def _visits(members, carved):
+    """(visits, addresses counted): the sum of each address's own visit
+    count (SPS id 6), each address once -- its live record's count where
+    there is one, else the highest count a recovered copy holds, an older
+    copy of the same cumulative counter. Members are live first, then the
+    last `carved` of them recovered (domain_rows)."""
+    split = len(members) - carved
+    live, best = {}, {}
+    for i, entry in enumerate(members):
+        count = entry.get("SPS_VisitCount")
+        if count is None:
+            continue
+        address = str(entry.get("CleanUrl") or entry.get("Url") or "")
+        try:
+            count = int(count)
+        except (TypeError, ValueError):
+            continue
+        if i < split:
+            live[address] = count
+        else:
+            best[address] = max(count, best.get(address, count))
+    best.update(live)
+    # None, not 0, when no address stores a count: "not recorded" is a
+    # different fact from "visited zero times".
+    return (sum(best.values()) if best else None), len(best)
+
+
 def domain_rows(live_entries, carved_entries=()):
     """One row per domain.
 
@@ -59,6 +86,7 @@ def domain_rows(live_entries, carved_entries=()):
     rows = []
     for domain, d in domains.items():
         carved = d["carved"]
+        visits, counted = _visits(d["members"], carved)
         # The count is the length of the member list, so the drill-down
         # pane always lists the same number of records.
         total = len(d["members"])
@@ -73,6 +101,8 @@ def domain_rows(live_entries, carved_entries=()):
             "ContainerType": ", ".join(sorted(d["container_types"])),
             "AccessCount": (round(sum(d["access_counts"]) / len(d["access_counts"]), 1)
                            if d["access_counts"] else 0),
+            "Visits": visits,
+            "VisitsAddresses": counted,
             "IsInPrivate": d["has_inprivate"],
             "_kind": K_DOMAIN,
             "_record": None,
